@@ -87,6 +87,7 @@ def get_args():
                         help="use wandb")
     parser.add_argument("--device", type=int, default=0,
                         help="cuda device id")
+    parser.add_argument("--get_onnx", type=int, default=0)
 
     return parser.parse_args()
 
@@ -206,6 +207,25 @@ class Trainer:
         if self.opt.load_weights_folder != "":
             self.load_model()
 
+        if self.opt.get_onnx:
+            dummy_input = torch.randn(self.opt.batch_size, 3, self.opt.height, self.opt.width, device=self.device)
+            torch.onnx.export(self.models["encoder"], dummy_input, f"{self.opt.model_name}_encoder.onnx", verbose=True)
+            dummy_input = torch.randn(
+                self.opt.batch_size,
+                128,
+                self.opt.occ_map_size // 2**5,
+                self.opt.occ_map_size // 2**5,
+                device=self.device
+            )
+            torch.onnx.export(self.models["decoder"], dummy_input, f"{self.opt.model_name}_decoder.onnx", verbose=True)
+            dummy_input = torch.randn(
+                self.opt.batch_size, 2, self.opt.occ_map_size, self.opt.occ_map_size, device=self.device
+            )
+            torch.onnx.export(self.models["discriminator"], dummy_input, f"{self.opt.model_name}_discriminator.onnx", verbose=True)
+
+            print('exported')
+
+
         print("Using split:\n  ", self.opt.split)
         print(
             "There are {:d} training items and {:d} validation items\n".format(
@@ -279,6 +299,9 @@ class Trainer:
 
     def validation(self):
         iou, mAP = np.array([0., 0.]), np.array([0., 0.])
+        if self.opt.use_wandb == 1:
+            sent = 0
+            
         for batch_idx, inputs in tqdm.tqdm(enumerate(self.val_loader)):
             with torch.no_grad():
                 outputs = self.process_batch(inputs, True)
@@ -290,6 +313,15 @@ class Trainer:
                 inputs[self.opt.type + "_gt"].detach().cpu().numpy())
             iou += mean_IU(pred, true)
             mAP += mean_precision(pred, true)
+
+            if self.opt.use_wandb == 1 and sent == 0:
+                wandb.log({
+                        'generated image': wandb.data_types.Image(pred),
+                        'reference image': wandb.data_types.Image(true)
+                    }
+                )
+                sent = 1
+
         iou /= len(self.val_loader)
         mAP /= len(self.val_loader)
 
@@ -386,6 +418,9 @@ class Trainer:
 
 if __name__ == "__main__":
     trainer = Trainer()
-    if trainer.opt.use_wandb == 1:
-        wandb.init(project='monolayout_2', entity='lemondrok')
-    trainer.train()
+    if trainer.opt.get_onnx == 0:
+        if trainer.opt.use_wandb == 1:
+            wandb.init(project='monolayout_2', entity='lemondrok', config=trainer.opt)
+        trainer.train()
+        if trainer.opt.use_wandb == 1:
+            wandb.finish()

@@ -87,6 +87,7 @@ def get_args():
                         help="use wandb")
     parser.add_argument("--device", type=int, default=0,
                         help="cuda device id")
+    parser.add_argument("--get_onnx", type=int, default=0)
 
     return parser.parse_args()
 
@@ -108,9 +109,7 @@ class Trainer:
         self.weight["dynamic"] = self.opt.dynamic_weight
         self.device = "cuda"
         torch.cuda.set_device(self.opt.device)
-        self.criterion_d = nn.BCEWithLogitsLoss()
         self.parameters_to_train = []
-        self.parameters_to_train_D = []
 
         if self.opt.use_wandb == 1:
             config = wandb.config
@@ -122,49 +121,22 @@ class Trainer:
         if self.opt.type == "both":
             self.models["static_decoder"] = monolayout.Decoder(
                 self.models["encoder"].resnet_encoder.num_ch_enc)
-            self.models["static_discr"] = monolayout.Discriminator()
             self.models["dynamic_decoder"] = monolayout.Discriminator()
             self.models["dynamic_decoder"] = monolayout.Decoder(
                 self.models["encoder"].resnet_encoder.num_ch_enc)
         else:
             self.models["decoder"] = monolayout.Decoder(
                 self.models["encoder"].resnet_encoder.num_ch_enc)
-            self.models["discriminator"] = monolayout.Discriminator()
 
         for key in self.models.keys():
             self.models[key].to(self.device)
-            if "discr" in key:
-                self.parameters_to_train_D += list(
-                    self.models[key].parameters())
-            else:
-                self.parameters_to_train += list(self.models[key].parameters())
+            self.parameters_to_train += list(self.models[key].parameters())
 
         # Optimization
         self.model_optimizer = optim.Adam(
             self.parameters_to_train, self.opt.lr)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
             self.model_optimizer, self.opt.scheduler_step_size, 0.1)
-
-        self.model_optimizer_D = optim.Adam(
-            self.parameters_to_train_D, self.opt.lr)
-        self.model_lr_scheduler_D = optim.lr_scheduler.StepLR(
-            self.model_optimizer_D, self.opt.scheduler_step_size, 0.1)
-
-        self.patch = (1, self.opt.occ_map_size // 2 **
-                      4, self.opt.occ_map_size // 2**4)
-
-        self.valid = Variable(
-            torch.Tensor(
-                np.ones(
-                    (self.opt.batch_size,
-                     *self.patch))),
-            requires_grad=False).float().cuda()
-        self.fake = Variable(
-            torch.Tensor(
-                np.zeros(
-                    (self.opt.batch_size,
-                     *self.patch))),
-            requires_grad=False).float().cuda()
 
         # Data Loaders
         dataset_dict = {"3Dobject": monolayout.KITTIObject,
@@ -208,6 +180,20 @@ class Trainer:
 
         if self.opt.load_weights_folder != "":
             self.load_model()
+
+        if self.opt.get_onnx:
+            dummy_input = torch.randn(self.opt.batch_size, 3, self.opt.height, self.opt.width, device=self.device)
+            torch.onnx.export(self.models["encoder"], dummy_input, f"{self.opt.model_name}_encoder.onnx", verbose=True)
+            dummy_input = torch.randn(
+                self.opt.batch_size,
+                128,
+                self.opt.occ_map_size // 2**5,
+                self.opt.occ_map_size // 2**5,
+                device=self.device
+            )
+            torch.onnx.export(self.models["decoder"], dummy_input, f"{self.opt.model_name}_decoder.onnx", verbose=True)
+
+            print('exported')
 
         print("Using split:\n  ", self.opt.split)
         print(
@@ -379,8 +365,9 @@ class Trainer:
 
 if __name__ == "__main__":
     trainer = Trainer()
-    if trainer.opt.use_wandb == 1:
-        wandb.init(project='monolayout_2', entity='lemondrok', config=trainer.opt)
-    trainer.train()
-    if trainer.opt.use_wandb == 1:
-        wandb.finish()
+    if trainer.opt.get_onnx == 0:
+        if trainer.opt.use_wandb == 1:
+            wandb.init(project='monolayout_2', entity='lemondrok', config=trainer.opt)
+        trainer.train()
+        if trainer.opt.use_wandb == 1:
+            wandb.finish()
