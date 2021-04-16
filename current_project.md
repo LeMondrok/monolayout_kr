@@ -62,6 +62,6 @@ __topview loss__: Crossentropy(generated_map, true_map)
 
 ## Active changes
 
-* Прикрутил флаги use_wandb и device для активации использования Weigth and Biases (логирую $loss_G$, $loss_D$, $topview\_loss$ после каждой эпохи и $mAP$, $IoU$ после $log\_freq$)
+* Прикрутил флаги use_wandb и device для активации использования Weigth and Biases (логирую $loss_G$, $loss_D$, $topview\_loss$ после каждой эпохи и $mAP$, $IoU$ после $log\_freq$, а также выкидываю одну произвольную сгенерированную картинку с референсом раз в валидацию). Флаг get_onnx позволяет получить только .onnx файл. 
 * Добавил класс набора данных KITTIRAWGT, состоящего только из размеченных элементов
 * Добавил негенеративную модель
