@@ -337,6 +337,12 @@ class nuScenesFront(MonoDataset):
         super(nuScenesFront, self).__init__(*args, **kwargs)
         self.root_dir = "./data/nuscenes"
 
+    def get_osm_path(self, root_dir):
+        osm_file = np.random.choice(os.listdir(root_dir))
+        osm_path = os.path.join(root_dir, osm_file)
+
+        return osm_path
+
     def get_image_path(self, root_dir, frame_index):
         file_name = frame_index.replace(
             "static_gt", "samples/CAM_FRONT")
