@@ -63,6 +63,36 @@ def abs2ego(ego_pose, cam_pose, annotation_data):
 
     return ans
 
+def get_fov_mask(cam_data):
+    occ_width, occ_height = 256, 256
+
+    sensor_data = nusc.get('calibrated_sensor', cam_front_data['calibrated_sensor_token'])
+
+    filename = cam_front_data['filename']
+    img = Image.open(f'{data_root}{filename}')
+
+    f_x = sensor_data['camera_intrinsic'][0][0]
+    w = img.size[0]
+
+    fov_x = 2 * np.arctan(w / (2 * f_x))
+    alpha = (np.pi - fov_x) / 2
+
+    polygons = [
+        [0, occ_height - occ_width * np.tan(alpha) / 2],
+        [occ_width / 2, occ_height],
+        [occ_width, occ_height - occ_width * np.tan(alpha) / 2],
+        [occ_width, occ_height],
+        [0, occ_height]
+    ]
+    
+    polygons = np.array(polygons)
+
+    rr, cc = polygon(polygons[:, 1], polygons[:, 0], (occ_width, occ_height))
+    ans = np.ones((occ_width, occ_height), dtype='uint8')
+    ans[rr, cc] = 0
+
+    return ans
+
 
 if __name__ == "__main__":
     args = get_args()
@@ -78,6 +108,8 @@ if __name__ == "__main__":
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    fov_mask = None
+
     for sample in nusc.sample:
         my_sample = nusc.get('sample', sample['token'])
         new_pic = np.zeros((occ_width, occ_height), dtype=np.uint8)
@@ -92,5 +124,8 @@ if __name__ == "__main__":
             if int(annotation_metadata['visibility_token']) > 2 and annotation_metadata['category_name'].split('.')[0] == 'vehicle':
                 new_pic += abs2ego(ego_pose, cam_pose, annotation_metadata)
 
-        img = Image.fromarray(new_pic)
+        if fov_mask is None:
+            fov_mask = get_fov_mask(cam_front_data)
+
+        img = Image.fromarray(fov_mask * new_pic)
         img.save(os.path.join(output_dir, cam_front_data['filename'].split('/')[-1]))

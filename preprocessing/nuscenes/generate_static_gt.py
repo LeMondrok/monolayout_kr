@@ -36,6 +36,36 @@ def get_mask_angle(ego_pose, cam_pose):
 
     return angle
 
+def get_fov_mask(cam_data):
+    occ_width, occ_height = 256, 256
+
+    sensor_data = nusc.get('calibrated_sensor', cam_front_data['calibrated_sensor_token'])
+
+    filename = cam_front_data['filename']
+    img = Image.open(f'{data_root}{filename}')
+
+    f_x = sensor_data['camera_intrinsic'][0][0]
+    h = img.size[0]
+
+    fov_x = 2 * np.arctan(h / (2 * f_x))
+    alpha = (np.pi - fov_x) / 2
+
+    polygons = [
+        [0, occ_height - occ_width * np.tan(alpha) / 2],
+        [occ_width / 2, occ_height],
+        [occ_width, occ_height - occ_width * np.tan(alpha) / 2],
+        [occ_width, occ_height],
+        [0, occ_height]
+    ]
+    
+    polygons = np.array(polygons)
+
+    rr, cc = polygon(polygons[:, 1], polygons[:, 0], (occ_width, occ_height))
+    ans = np.ones((occ_width, occ_height), dtype='uint8')
+    ans[rr, cc] = 0
+
+    return ans
+
 
 if __name__ == "__main__":
     args = get_args()
@@ -52,6 +82,7 @@ if __name__ == "__main__":
         os.makedirs(output_dir)
 
     old_location = None
+    fov_mask = None
 
     for sample in nusc.sample:
         my_sample = nusc.get('sample', sample['token'])
@@ -82,5 +113,8 @@ if __name__ == "__main__":
         map_mask = map_mask[:occ_height, int(occ_width / 2): -int((occ_width + 1) / 2)]
         map_mask = np.flip(map_mask, 1)
 
-        img = Image.fromarray(map_mask * 255)
+        if fov_mask is None:
+            fov_mask = get_fov_mask(cam_front_data)
+
+        img = Image.fromarray(fov_mask * map_mask * 255)
         img.save(os.path.join(output_dir, cam_front_data['filename'].split('/')[-1]))
