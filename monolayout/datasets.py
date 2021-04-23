@@ -331,3 +331,34 @@ class Argoverse(MonoDataset):
 
     def get_dynamic_gt_path(self, root_dir, frame_index):
         return self.get_dynamic_path(self, root_dir, frame_index)
+
+class nuScenesFront(MonoDataset):
+    def __init__(self, *args, **kwargs):
+        super(nuScenesFront, self).__init__(*args, **kwargs)
+        self.root_dir = "./data/nuscenes"
+
+    def get_image_path(self, root_dir, frame_index):
+        file_name = frame_index.replace(
+            "static_gt", "samples/CAM_FRONT")
+        img_path = os.path.join(root_dir, file_name)
+        return img_path
+
+    def get_static_path(self, root_dir, frame_index):
+        path = os.path.join(root_dir, frame_index)
+        return path
+
+    def get_dynamic_path(self, root_dir, frame_index):
+        file_name = frame_index.replace(
+            "static_gt", "dynamic_gt")
+        path = os.path.join(root_dir, file_name)
+        return path
+
+    def get_static_gt_path(self, root_dir, frame_index):
+        path = os.path.join(root_dir, frame_index)
+        return path
+
+    def get_dynamic_gt_path(self, root_dir, frame_index):
+        file_name = frame_index.replace(
+            "static_gt", "dynamic_gt")
+        path = os.path.join(root_dir, file_name)
+        return path

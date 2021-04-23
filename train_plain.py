@@ -41,7 +41,8 @@ def get_args():
             "3Dobject",
             "odometry",
             "raw",
-            "raw_gt"],
+            "raw_gt",
+            "nuscenes"],
         help="Data split for training/validation")
     parser.add_argument("--ext", type=str, default="png",
                         help="File extension of the images")
@@ -143,7 +144,8 @@ class Trainer:
                         "odometry": monolayout.KITTIOdometry,
                         "argo": monolayout.Argoverse,
                         "raw": monolayout.KITTIRAW,
-                        "raw_gt": monolayout.KITTIRAW}
+                        "raw_gt": monolayout.KITTIRAW,
+                        "nuscenes": monolayout.nuScenesFront}
 
         self.dataset = dataset_dict[self.opt.split]
         fpath = os.path.join(
@@ -161,7 +163,6 @@ class Trainer:
 
         train_dataset = self.dataset(self.opt, train_filenames)
         val_dataset = self.dataset(self.opt, val_filenames, is_train=False)
-
 
         self.train_loader = DataLoader(
             train_dataset,
