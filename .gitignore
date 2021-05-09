@@ -116,16 +116,7 @@ LICENSE
 README.md
 
 # Local
-data
+data/osm
 models
 wandb
-splits
-requirements.txt
-eval.py
-test.py
-utils.py
-preprocessing/kitti/
-preprocessing/argoverse/
-monolayout/__init__.py
-monolayout/resnet_encoder.py
 # End of https://www.gitignore.io/api/python
