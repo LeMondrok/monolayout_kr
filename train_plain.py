@@ -111,33 +111,11 @@ class Trainer:
         self.device = "cuda"
         torch.cuda.set_device(self.opt.device)
         self.parameters_to_train = []
-
+        
         if self.opt.use_wandb == 1:
+            os.environ["WANDB_API_KEY"] = '2dcc30825576b963413cb9be6d9910177c8f0dc8'
             config = wandb.config
             config.params = self.opt
-
-        # Initializing models
-        self.models["encoder"] = monolayout.Encoder(
-            18, self.opt.height, self.opt.width, True)
-        if self.opt.type == "both":
-            self.models["static_decoder"] = monolayout.Decoder(
-                self.models["encoder"].resnet_encoder.num_ch_enc)
-            self.models["dynamic_decoder"] = monolayout.Discriminator()
-            self.models["dynamic_decoder"] = monolayout.Decoder(
-                self.models["encoder"].resnet_encoder.num_ch_enc)
-        else:
-            self.models["decoder"] = monolayout.Decoder(
-                self.models["encoder"].resnet_encoder.num_ch_enc)
-
-        for key in self.models.keys():
-            self.models[key].to(self.device)
-            self.parameters_to_train += list(self.models[key].parameters())
-
-        # Optimization
-        self.model_optimizer = optim.Adam(
-            self.parameters_to_train, self.opt.lr)
-        self.model_lr_scheduler = optim.lr_scheduler.StepLR(
-            self.model_optimizer, self.opt.scheduler_step_size, 0.1)
 
         # Data Loaders
         dataset_dict = {"3Dobject": monolayout.KITTIObject,
@@ -159,10 +137,11 @@ class Trainer:
         self.val_filenames = val_filenames
         self.train_filenames = train_filenames
 
-        # importante !
-
         train_dataset = self.dataset(self.opt, train_filenames)
         val_dataset = self.dataset(self.opt, val_filenames, is_train=False)
+        
+        self.static_classes = len(getattr(train_dataset, 'static_classes', [1]))
+        self.dynamic_classes = len(getattr(train_dataset, 'dynamic_classes', [1]))
 
         self.train_loader = DataLoader(
             train_dataset,
@@ -178,6 +157,36 @@ class Trainer:
             num_workers=self.opt.num_workers,
             pin_memory=True,
             drop_last=True)
+        
+        # Initializing models
+        self.models["encoder"] = monolayout.Encoder(
+            18, self.opt.height, self.opt.width, True)
+        if self.opt.type == "both":
+            self.models["static_decoder"] = monolayout.Decoder(
+                self.models["encoder"].resnet_encoder.num_ch_enc, self.static_classes)
+            self.models["dynamic_decoder"] = monolayout.Decoder(
+                self.models["encoder"].resnet_encoder.num_ch_enc, self.dynamic_classes)
+        elif self.opt.type == "static":
+            self.models["decoder"] = monolayout.Decoder(
+                self.models["encoder"].resnet_encoder.num_ch_enc, self.static_classes)
+            
+            self.classes = self.static_classes
+        else:
+            self.models["decoder"] = monolayout.Decoder(
+                self.models["encoder"].resnet_encoder.num_ch_enc, self.dynamic_classes)
+            
+            self.classes = self.dynamic_classes
+
+        for key in self.models.keys():
+            self.models[key].to(self.device)
+            self.parameters_to_train += list(self.models[key].parameters())
+
+        # Optimization
+        self.model_optimizer = optim.Adam(
+            self.parameters_to_train, self.opt.lr)
+        self.model_lr_scheduler = optim.lr_scheduler.StepLR(
+            self.model_optimizer, self.opt.scheduler_step_size, 0.1)
+        
 
         if self.opt.load_weights_folder != "":
             self.load_model()
@@ -206,8 +215,12 @@ class Trainer:
 
         for self.epoch in range(self.opt.num_epochs):
             loss = self.run_epoch()
-            print("Epoch: %d | Loss: %.4f" %
-                  (self.epoch, loss["loss"]))
+            if self.opt.type == "both":
+                print("Epoch: %d | Static loss: %.4f | Dynamic loss: %.4f" %
+                      (self.epoch, loss["static_loss"], loss["dynamic_loss"]))
+            else:
+                print("Epoch: %d | Loss: %.4f" %
+                      (self.epoch, loss["loss"]))
 
             if self.epoch % self.opt.log_frequency == 0:
                 self.validation()
@@ -234,52 +247,135 @@ class Trainer:
     def run_epoch(self):
         self.model_optimizer.step()
         loss = {}
-        loss["loss"] = 0.0
+        if self.opt.type == "both":
+            loss["static_loss"] = 0.0
+            loss["dynamic_loss"] = 0.0
+        else:
+            loss["loss"] = 0.0
+            
         for batch_idx, inputs in tqdm.tqdm(enumerate(self.train_loader)):
             outputs, losses = self.process_batch(inputs)
             self.model_optimizer.zero_grad()
             if self.opt.use_wandb == 1:
-                wandb.log({"loss": losses["loss"]})
+                if self.opt.type == "both":
+                    wandb.log({"static_loss": losses["static_loss"]})
+                    wandb.log({"dynamic_loss": losses["dynamic_loss"]})
+                else:
+                    wandb.log({"loss": losses["loss"]})
 
-            losses["loss"].backward()
+            if self.opt.type == "both":
+                losses["static_loss"].backward(retain_graph=True)
+                losses["dynamic_loss"].backward()
+            else:
+                losses["loss"].backward()
+                
             self.model_optimizer.step()
+                
+            if self.opt.type == "both":
+                loss["static_loss"] += losses["static_loss"].item()
+                loss["dynamic_loss"] += losses["dynamic_loss"].item()
+            else:
+                loss["loss"] += losses["loss"].item()
 
-            loss["loss"] += losses["loss"].item()
-        loss["loss"] /= len(self.train_loader)
+        if self.opt.type == "both":
+            loss["static_loss"] /= len(self.train_loader)
+            loss["dynamic_loss"] /= len(self.train_loader)
+        else:
+            loss["loss"] /= len(self.train_loader)
+            
         return loss
 
     def validation(self):
-        iou, mAP = np.array([0., 0.]), np.array([0., 0.])
+        if self.opt.type == "both":
+            iou_static, mAP_static = np.array([[0., 0.] for i in range(self.static_classes)]), np.array([[0., 0.] for i in range(self.static_classes)])
+            iou_dynamic, mAP_dynamic = np.array([[0., 0.] for i in range(self.dynamic_classes)]), np.array([[0., 0.] for i in range(self.dynamic_classes)])
+        else:    
+            iou, mAP = np.array([[0., 0.] for i in range(self.classes)]), np.array([[0., 0.] for i in range(self.classes)])
+        
         if self.opt.use_wandb == 1:
             sent = 0
 
         for batch_idx, inputs in tqdm.tqdm(enumerate(self.val_loader)):
             with torch.no_grad():
                 outputs = self.process_batch(inputs, True)
-            pred = np.squeeze(
-                torch.argmax(
-                    outputs["topview"].detach(),
-                    1).cpu().numpy())
-            true = np.squeeze(
-                inputs[self.opt.type + "_gt"].detach().cpu().numpy())
-            iou += mean_IU(pred, true)
-            mAP += mean_precision(pred, true)
+                
+            if self.opt.type == "both":
+                static_pred = np.squeeze(
+                    torch.argmax(
+                        outputs["static"].detach(),
+                        1).cpu().numpy())
+                static_true = np.squeeze(
+                    inputs["static_gt"].detach().cpu().numpy())
+                                
+                dynamic_pred = np.squeeze(
+                    torch.argmax(
+                        outputs["dynamic"].detach(),
+                        1).cpu().numpy())
+                dynamic_true = np.squeeze(
+                    inputs["dynamic_gt"].detach().cpu().numpy())
+                
+                iou_static += mean_IU(static_pred, static_true)
+                mAP_static += mean_precision(static_pred, static_true)
+                                             
+                iou_dynamic += mean_IU(dynamic_pred, dynamic_true)
+                mAP_dynamic += mean_precision(dynamic_pred, dynamic_true)
+                
+                if self.opt.use_wandb == 1 and sent == 0:
+                    wandb.log({
+                            'static generated images': [wandb.data_types.Image(img) for img in static_pred],
+                            'static reference images': [wandb.data_types.Image(img) for img in static_true],
+                            'dynamic generated images': [wandb.data_types.Image(img) for img in dynamic_pred],
+                            'dynamic reference images': [wandb.data_types.Image(img) for img in dynamic_true]
+                        }
+                    )
+                    sent = 1
+            else:
+                pred = np.squeeze(
+                    torch.argmax(
+                        outputs["topview"].detach(),
+                        1).cpu().numpy())
+                true = np.squeeze(
+                    inputs[self.opt.type + "_gt"].detach().cpu().numpy())
+                iou += mean_IU(pred, true)
+                mAP += mean_precision(pred, true)
 
-            if self.opt.use_wandb == 1 and sent == 0:
+                if self.opt.use_wandb == 1 and sent == 0:
+                    wandb.log({
+                            'generated images': [wandb.data_types.Image(img) for img in pred],
+                            'reference images': [wandb.data_types.Image(img) for img in true]
+                        }
+                    )
+                    sent = 1
+                    
+        if self.opt.type == "both":
+            iou_static /= len(self.val_loader)
+            mAP_static /= len(self.val_loader)
+            iou_dynamic /= len(self.val_loader)
+            mAP_dynamic /= len(self.val_loader)
+            
+            if self.opt.use_wandb == 1:
                 wandb.log({
-                        'generated image': wandb.data_types.Image(pred),
-                        'reference image': wandb.data_types.Image(true)
-                    }
-                )
-                sent = 1
-        iou /= len(self.val_loader)
-        mAP /= len(self.val_loader)
+                    'validation_iou_static': iou_static[:, 1],
+                    'validation_mAP_static': mAP_static[:, 1],
+                    'validation_iou_dynamic': iou_dynamic[:, 1],
+                    'validation_mAP_dynamic': mAP_dynamic[:, 1]
+                })
 
-        if self.opt.use_wandb == 1:
-            wandb.log({'validation_iou': iou[1], 'validation_mAP': mAP[1]})
-        print(
-            "Epoch: %d | Validation: mIOU: %.4f mAP: %.4f" %
-            (self.epoch, iou[1], mAP[1]))
+            print(
+                "Epoch: {} | Validation: mIOU_static: {} mAP_static: {} mIOU_dynamic: {} mAP_dynamic: {}".format(
+                    self.epoch, iou_static[:, 1], mAP_static[:, 1], iou_dynamic[:, 1], mAP_dynamic[:, 1]
+                )
+            )
+        else:
+            iou /= len(self.val_loader)
+            mAP /= len(self.val_loader)
+
+            if self.opt.use_wandb == 1:
+                wandb.log({'validation_iou': iou[:, 1], 'validation_mAP': mAP[:, 1]})
+
+            print(
+                "Epoch: {} | Validation: mIOU: {} mAP: {}".format(self.epoch, iou[:, 1], mAP[:, 1])
+            )
 
     def compute_losses(self, inputs, outputs):
         losses = {}
@@ -287,11 +383,11 @@ class Trainer:
             losses["static_loss"] = self.compute_topview_loss(
                                             outputs["static"],
                                             inputs["static"],
-                                            self.weight[self.opt.type])
+                                            self.weight["static"])
             losses["dynamic_loss"] = self.compute_topview_loss(
-                                            outputs["dynamic_loss"],
+                                            outputs["dynamic"],
                                             inputs["dynamic"],
-                                            self.weight[self.opt.type])
+                                            self.weight["dynamic"])
         else:
             losses["loss"] = self.compute_topview_loss(
                                             outputs["topview"],
@@ -300,7 +396,6 @@ class Trainer:
         return losses
 
     def compute_topview_loss(self, outputs, true_top_view, weight):
-
         generated_top_view = outputs
         true_top_view = torch.squeeze(true_top_view.long())
         loss = nn.CrossEntropyLoss(weight=torch.Tensor([1., weight]).cuda())

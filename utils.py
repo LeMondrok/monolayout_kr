@@ -6,50 +6,62 @@ import numpy as np
 def mean_precision(eval_segm, gt_segm):
 
     check_size(eval_segm, gt_segm)
-    cl, n_cl = extract_classes(gt_segm)
-    eval_mask, gt_mask = extract_both_masks(eval_segm, gt_segm, cl, n_cl)
-    mAP = [0] * n_cl
-    for i, c in enumerate(cl):
-        curr_eval_mask = eval_mask[i, :, :]
-        curr_gt_mask = gt_mask[i, :, :]
-        n_ii = np.sum(np.logical_and(curr_eval_mask, curr_gt_mask))
-        n_ij = np.sum(curr_eval_mask)
-        val = n_ii / float(n_ij)
-        if math.isnan(val):
-            mAP[i] = 0.
-        else:
-            mAP[i] = val
+    
+    ans = []
+    
+    for clf_task in range(eval_segm.shape[0]):
+        cl, n_cl = extract_classes(gt_segm[clf_task])
+        eval_mask, gt_mask = extract_both_masks(eval_segm[clf_task], gt_segm[clf_task], cl, n_cl)
+        mAP = [0] * 2
+        for i, c in enumerate(cl):
+            curr_eval_mask = eval_mask[i, :, :]
+            curr_gt_mask = gt_mask[i, :, :]
+            n_ii = np.sum(np.logical_and(curr_eval_mask, curr_gt_mask))
+            n_ij = np.sum(curr_eval_mask)
+            val = n_ii / float(n_ij)
+            if math.isnan(val):
+                mAP[i] = 0.
+            else:
+                mAP[i] = val
+                
+        ans.append(mAP)
     # print(mAP)
-    return mAP
+    return np.array(ans)
 
 
 def mean_IU(eval_segm, gt_segm):
     '''
     (1/n_cl) * sum_i(n_ii / (t_i + sum_j(n_ji) - n_ii))
     '''
-
+    
     check_size(eval_segm, gt_segm)
+        
+    ans = []
+    
+    for clf_task in range(eval_segm.shape[0]):
+        cl, n_cl = union_classes(eval_segm[clf_task], gt_segm[clf_task])
+        _, n_cl_gt = extract_classes(gt_segm[clf_task])
+        eval_mask, gt_mask = extract_both_masks(eval_segm[clf_task], gt_segm[clf_task], cl, n_cl)
 
-    cl, n_cl = union_classes(eval_segm, gt_segm)
-    _, n_cl_gt = extract_classes(gt_segm)
-    eval_mask, gt_mask = extract_both_masks(eval_segm, gt_segm, cl, n_cl)
+        #only 2 classes per channel
+        IU = list([0]) * 2
 
-    IU = list([0]) * n_cl
+        for i, c in enumerate(cl):
+            curr_eval_mask = eval_mask[i, :, :]
+            curr_gt_mask = gt_mask[i, :, :]
 
-    for i, c in enumerate(cl):
-        curr_eval_mask = eval_mask[i, :, :]
-        curr_gt_mask = gt_mask[i, :, :]
+            if (np.sum(curr_eval_mask) == 0) or (np.sum(curr_gt_mask) == 0):
+                continue
 
-        if (np.sum(curr_eval_mask) == 0) or (np.sum(curr_gt_mask) == 0):
-            continue
+            n_ii = np.sum(np.logical_and(curr_eval_mask, curr_gt_mask))
+            t_i = np.sum(curr_gt_mask)
+            n_ij = np.sum(curr_eval_mask)
 
-        n_ii = np.sum(np.logical_and(curr_eval_mask, curr_gt_mask))
-        t_i = np.sum(curr_gt_mask)
-        n_ij = np.sum(curr_eval_mask)
+            IU[i] = n_ii / (t_i + n_ij - n_ii)
+            
+        ans.append(IU)
 
-        IU[i] = n_ii / (t_i + n_ij - n_ii)
-
-    return IU
+    return np.array(ans)
 
 
 '''
@@ -88,7 +100,7 @@ def union_classes(eval_segm, gt_segm):
 def extract_masks(segm, cl, n_cl):
     h, w = segm_size(segm)
     masks = np.zeros((n_cl, h, w))
-
+    
     for i, c in enumerate(cl):
         masks[i, :, :] = segm == c
 

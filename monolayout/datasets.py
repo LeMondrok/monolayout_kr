@@ -10,6 +10,8 @@ import numpy as np
 
 import torch.utils.data as data
 
+import torch
+
 from torchvision import transforms
 
 
@@ -38,15 +40,19 @@ def resize_topview(topview, size):
 
 
 def process_discr(topview, size):
-    topview = resize_topview(topview, size)
-    topview_n = np.zeros((size, size, 2))
-    topview_n[topview == 255, 1] = 1.
-    topview_n[topview == 0, 0] = 1.
-    return topview_n
+    topviews_n = []
+    for view_ind in range(len(topview)):
+        temp_topview = resize_topview(topview[view_ind], size)
+        topview_n = np.zeros((size, size, 2))
+        topview_n[temp_topview == 255, 1] = 1.
+        topview_n[temp_topview == 0, 0] = 1.
+        
+        topviews_n.append(topview_n)
+    return topviews_n
 
 
 class MonoDataset(data.Dataset):
-    def __init__(self, opt, filenames, is_train=True):
+    def __init__(self, opt, filenames, use_osm=True, is_train=True):
         super(MonoDataset, self).__init__()
 
         self.opt = opt
@@ -58,6 +64,7 @@ class MonoDataset(data.Dataset):
         self.interp = pil.ANTIALIAS
         self.loader = pil_loader
         self.to_tensor = transforms.ToTensor()
+        self.use_osm = use_osm
 
         try:
             self.brightness = (0.8, 1.2)
@@ -81,9 +88,20 @@ class MonoDataset(data.Dataset):
 
         for key in inputs.keys():
             if key != "color" and "discr" not in key:
-                inputs[key] = process_topview(
-                    inputs[key], self.opt.occ_map_size)
-            inputs[key] = self.to_tensor(inputs[key])
+                for img_ind in range(len(inputs[key])):
+                    inputs[key][img_ind] = process_topview(
+                        inputs[key][img_ind], self.opt.occ_map_size)
+                
+            if key != "color":
+                for img_ind in range(len(inputs[key])):
+                    inputs[key][img_ind] = self.to_tensor(inputs[key][img_ind])
+                    
+                inputs[key] = torch.cat(inputs[key])
+                
+                if "discr" in key:
+                    inputs[key] = inputs[key].reshape(2, inputs[key].shape[0] // 2, inputs[key].shape[1], inputs[key].shape[2])
+            else:
+                inputs[key] = self.to_tensor(np.array(inputs[key]))
 
     def __len__(self):
         return len(self.filenames)
@@ -103,11 +121,16 @@ class MonoDataset(data.Dataset):
             if self.is_train:
                 inputs["static"] = self.get_static(
                     folder, frame_index, do_flip)
-                inputs["discr"] = process_discr(
-                    self.get_osm(
-                        self.opt.osm_path,
-                        do_flip),
-                    self.opt.occ_map_size)
+                if self.use_osm:
+                    inputs["discr"] = process_discr(
+                        self.get_osm(
+                            self.opt.osm_path,
+                            do_flip),
+                        self.opt.occ_map_size)
+                else:
+                    inputs["discr"] = process_discr(
+                        inputs["static"], self.opt.occ_map_size)
+                    
             else:
                 inputs["static_gt"] = self.get_static_gt(
                     folder, frame_index, do_flip)
@@ -127,10 +150,14 @@ class MonoDataset(data.Dataset):
                     folder, frame_index, do_flip)
                 inputs["dynamic"] = self.get_dynamic(
                     folder, frame_index, do_flip)
-                inputs["static_discr"] = process_discr(self.get_osm(
-                    self.opt.osm_path, do_flip), self.opt.occ_map_size)
-                inputs["dynamic_discr"] = self.get_dynamic(
-                    folder, frame_index, do_flip)
+                if self.use_osm:
+                    inputs["static_discr"] = process_discr(self.get_osm(
+                        self.opt.osm_path, do_flip), self.opt.occ_map_size)
+                else:
+                    inputs["static_discr"] = process_discr(
+                        inputs["static"], self.opt.occ_map_size)
+                inputs["dynamic_discr"] = process_discr(
+                    inputs["dynamic"], self.opt.occ_map_size)
             else:
                 inputs["dynamic_gt"] = self.get_dynamic_gt(
                     folder, frame_index, do_flip)
@@ -156,32 +183,72 @@ class MonoDataset(data.Dataset):
         return color
 
     def get_static(self, folder, frame_index, do_flip):
-        tv = self.loader(self.get_static_path(folder, frame_index))
+        path = self.get_static_path(folder, frame_index)
+        
+        if not isinstance(path, list):
+            path = [path]
+                
+        tvs = []
+        for p in path:
+            tv = self.loader(p)
 
-        if do_flip:
-            tv = tv.transpose(pil.FLIP_LEFT_RIGHT)
-
-        return tv.convert('L')
+            if do_flip:
+                tv = tv.transpose(pil.FLIP_LEFT_RIGHT)
+        
+            tv = tv.convert('L')
+            tvs.append(tv)
+        
+        return tvs
 
     def get_dynamic(self, folder, frame_index, do_flip):
-        tv = self.loader(self.get_dynamic_path(folder, frame_index))
+        path = self.get_dynamic_path(folder, frame_index)
+        
+        if not isinstance(path, list):
+            path = [path]
+                
+        tvs = []
+        for p in path:
+            tv = self.loader(p)
 
-        if do_flip:
-            tv = tv.transpose(pil.FLIP_LEFT_RIGHT)
-
-        return tv.convert('L')
+            if do_flip:
+                tv = tv.transpose(pil.FLIP_LEFT_RIGHT)
+        
+            tv = tv.convert('L')
+            tvs.append(tv)
+        
+        return tvs
 
     def get_osm(self, root_dir, do_flip):
         osm = self.loader(self.get_osm_path(root_dir))
         return osm
 
-    def get_static_gt(self, folder, frame_index, do_flip):
-        tv = self.loader(self.get_static_gt_path(folder, frame_index))
-        return tv.convert('L')
+    def get_static_gt(self, folder, frame_index, do_flip):        
+        path = self.get_static_gt_path(folder, frame_index)
+        
+        if not isinstance(path, list):
+            path = [path]
+                
+        tvs = []
+        for p in path:
+            tv = self.loader(p)        
+            tv = tv.convert('L')
+            tvs.append(tv)
+        
+        return tvs
 
     def get_dynamic_gt(self, folder, frame_index, do_flip):
-        tv = self.loader(self.get_dynamic_gt_path(folder, frame_index))
-        return tv.convert('L')
+        path = self.get_dynamic_gt_path(folder, frame_index)
+        
+        if not isinstance(path, list):
+            path = [path]
+                
+        tvs = []
+        for p in path:
+            tv = self.loader(p)        
+            tv = tv.convert('L')
+            tvs.append(tv)
+        
+        return tvs
 
 
 class KITTIObject(MonoDataset):
@@ -334,14 +401,18 @@ class Argoverse(MonoDataset):
 
 class nuScenesFront(MonoDataset):
     def __init__(self, *args, **kwargs):
-        super(nuScenesFront, self).__init__(*args, **kwargs)
+        super(nuScenesFront, self).__init__(*args, use_osm=False, **kwargs) 
         self.root_dir = "./data/nuscenes"
-
-    def get_osm_path(self, root_dir):
-        osm_file = np.random.choice(os.listdir(root_dir))
-        osm_path = os.path.join(root_dir, osm_file)
-
-        return osm_path
+        self.static_classes = [
+            'drivable_area',
+            'ped_crossing',
+            'walkway'
+        ]
+        self.dynamic_classes = [
+            'car',
+            'truck',
+            'bus'
+        ]
 
     def get_image_path(self, root_dir, frame_index):
         file_name = frame_index.replace(
@@ -350,21 +421,37 @@ class nuScenesFront(MonoDataset):
         return img_path
 
     def get_static_path(self, root_dir, frame_index):
+        ans = []
+        
         path = os.path.join(root_dir, frame_index)
-        return path
+            
+        for cls_ in self.static_classes:
+            ans.append(
+                path.replace(
+                    "static_gt",
+                    os.path.join("static_gt", cls_)
+                )
+            )
+            
+        return ans
 
     def get_dynamic_path(self, root_dir, frame_index):
-        file_name = frame_index.replace(
-            "static_gt", "dynamic_gt")
-        path = os.path.join(root_dir, file_name)
-        return path
+        ans = []
+        
+        path = os.path.join(root_dir, frame_index)
+            
+        for cls_ in self.dynamic_classes:
+            ans.append(
+                path.replace(
+                    "static_gt",
+                    os.path.join("dynamic_gt", cls_)
+                )
+            )
+            
+        return ans
 
     def get_static_gt_path(self, root_dir, frame_index):
-        path = os.path.join(root_dir, frame_index)
-        return path
+        return self.get_static_path(root_dir, frame_index)
 
     def get_dynamic_gt_path(self, root_dir, frame_index):
-        file_name = frame_index.replace(
-            "static_gt", "dynamic_gt")
-        path = os.path.join(root_dir, file_name)
-        return path
+        return self.get_dynamic_path(root_dir, frame_index)

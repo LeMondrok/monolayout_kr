@@ -120,9 +120,9 @@ class Decoder(nn.Module):
         Processes input image features into output occupancy maps/layouts
     """
 
-    def __init__(self, num_ch_enc):
+    def __init__(self, num_ch_enc, num_output_channels):
         super(Decoder, self).__init__()
-        self.num_output_channels = 2
+        self.num_output_channels = num_output_channels
         self.num_ch_enc = num_ch_enc
         self.num_ch_dec = np.array([16, 32, 64, 128, 256])
         # decoder
@@ -142,7 +142,7 @@ class Decoder(nn.Module):
             self.convs[("norm", i, 1)] = nn.BatchNorm2d(num_ch_out)
 
         self.convs["topview"] = Conv3x3(
-            self.num_ch_dec[0], self.num_output_channels)
+            self.num_ch_dec[0], 2 * self.num_output_channels)
         self.dropout = nn.Dropout3d(0.2)
         self.decoder = nn.ModuleList(list(self.convs.values()))
 
@@ -174,7 +174,27 @@ class Decoder(nn.Module):
 
         if is_training:
             x = self.convs["topview"](x)
+            
+            new_shape = []
+            for ind, dim in enumerate(x.shape):
+                if ind == 1:
+                    new_shape.append(2)
+                    new_shape.append(dim // 2)
+                else:
+                    new_shape.append(dim)
+            x = x.reshape(new_shape)
+            
         else:
+            new_shape = []
+            for ind, dim in enumerate(x.shape):
+                if ind == 1:
+                    new_shape.append(2)
+                    new_shape.append(dim / 2)
+                else:
+                    new_shape.append(dim)
+
+            x = x.reshape(new_shape)
+            
             softmax = nn.Softmax2d()
             x = softmax(self.convs["topview"](x))
 
@@ -187,11 +207,12 @@ class Discriminator(nn.Module):
     in order to produce layouts close to the true data distribution
     """
 
-    def __init__(self):
+    def __init__(self, in_channels=1):
         super(Discriminator, self).__init__()
+        self.in_channels = in_channels
         self.main = nn.Sequential(
             # input is (nc) x 64 x 64
-            nn.Conv2d(2, 8, 3, 2, 1, 1, bias=False),
+            nn.Conv2d(2 * self.in_channels, 8, 3, 2, 1, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 32 x 32
             nn.Conv2d(8, 16, 3, 2, 1, 1, bias=False),
@@ -225,5 +246,6 @@ class Discriminator(nn.Module):
             Patch output of the Discriminator
             | Shape: (batch_size, 1, occ_map_size/16, occ_map_size/16)
         """
+        x = x.reshape(x.shape[0], 2 * self.in_channels, x.shape[3], x.shape[4])
 
         return self.main(x)

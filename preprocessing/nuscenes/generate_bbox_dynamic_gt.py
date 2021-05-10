@@ -93,6 +93,11 @@ def get_fov_mask(cam_data):
 
     return ans
 
+classes = [
+    'car',
+    'truck',
+    'bus',
+]
 
 if __name__ == "__main__":
     args = get_args()
@@ -101,31 +106,34 @@ if __name__ == "__main__":
     nusc = NuScenes(version=args.nusc_version, dataroot=data_root, verbose=True)
 
     occ_width, occ_height = 256, 256
-    sensor = 'CAM_FRONT'
+    
+    for cls_ in classes:
+        sensor = 'CAM_FRONT'
 
-    output_dir = f'{data_root}/dynamic_gt'
+        output_dir = f'{data_root}/dynamic_gt/{cls_}'
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
 
-    fov_mask = None
+        fov_mask = None
 
-    for sample in nusc.sample:
-        my_sample = nusc.get('sample', sample['token'])
-        new_pic = np.zeros((occ_width, occ_height), dtype=np.uint8)
-        new_pic.fill(0)
+        for sample in nusc.sample:
+            my_sample = nusc.get('sample', sample['token'])
+            new_pic = np.zeros((occ_width, occ_height), dtype=np.uint8)
+            new_pic.fill(0)
 
-        cam_front_data = nusc.get('sample_data', my_sample['data'][sensor])
-        ego_pose = nusc.get('ego_pose', cam_front_data['ego_pose_token'])
-        cam_pose = nusc.get('calibrated_sensor', cam_front_data['calibrated_sensor_token'])
+            cam_front_data = nusc.get('sample_data', my_sample['data'][sensor])
+            ego_pose = nusc.get('ego_pose', cam_front_data['ego_pose_token'])
+            cam_pose = nusc.get('calibrated_sensor', cam_front_data['calibrated_sensor_token'])
 
-        for annotation in my_sample['anns']:
-            annotation_metadata = nusc.get('sample_annotation', annotation)
-            if int(annotation_metadata['visibility_token']) > 2 and annotation_metadata['category_name'].split('.')[0] == 'vehicle':
-                new_pic += abs2ego(ego_pose, cam_pose, annotation_metadata)
+            for annotation in my_sample['anns']:
+                annotation_metadata = nusc.get('sample_annotation', annotation)
+#                 if int(annotation_metadata['visibility_token']) > 2 and annotation_metadata['category_name'].split('.')[0] == 'vehicle':
+                if int(annotation_metadata['visibility_token']) > 2 and annotation_metadata['category_name'].split('.')[1] == cls_:
+                    new_pic += abs2ego(ego_pose, cam_pose, annotation_metadata)
 
-        if fov_mask is None:
-            fov_mask = get_fov_mask(cam_front_data)
+            if fov_mask is None:
+                fov_mask = get_fov_mask(cam_front_data)
 
-        img = Image.fromarray(fov_mask * new_pic)
-        img.save(os.path.join(output_dir, cam_front_data['filename'].split('/')[-1]))
+            img = Image.fromarray(fov_mask * new_pic)
+            img.save(os.path.join(output_dir, cam_front_data['filename'].split('/')[-1]))

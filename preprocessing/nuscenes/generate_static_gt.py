@@ -66,6 +66,12 @@ def get_fov_mask(cam_data):
 
     return ans
 
+classes = [
+    'drivable_area',
+    'ped_crossing',
+    'walkway',
+]
+
 
 if __name__ == "__main__":
     args = get_args()
@@ -78,8 +84,6 @@ if __name__ == "__main__":
 
     output_dir = f'{data_root}/static_gt'
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
 
     old_location = None
     fov_mask = None
@@ -107,14 +111,20 @@ if __name__ == "__main__":
             2 * scale
         ]
         patch_angle = get_mask_angle(ego_pose, cam_pose)
-        layer_names = ['drivable_area']
 
-        map_mask = nusc_map.get_map_mask(patch_box, patch_angle, layer_names, (2 * occ_width, 2 * occ_height))[0]
-        map_mask = map_mask[:occ_height, int(occ_width / 2): -int((occ_width + 1) / 2)]
-        map_mask = np.flip(map_mask, 1)
+        map_masks = nusc_map.get_map_mask(patch_box, patch_angle, classes, (2 * occ_width, 2 * occ_height))
+        
+        for ind, cls_ in enumerate(classes):
+            map_mask = map_masks[ind]
+            map_mask = map_mask[:occ_height, int(occ_width / 2): -int((occ_width + 1) / 2)]
+            map_mask = np.flip(map_mask, 1)
 
-        if fov_mask is None:
-            fov_mask = get_fov_mask(cam_front_data)
+            if fov_mask is None:
+                fov_mask = get_fov_mask(cam_front_data)
+                
+            path = os.path.join(output_dir, cls_)
+            if not os.path.exists(path):
+                os.makedirs(path)
 
-        img = Image.fromarray(fov_mask * map_mask * 255)
-        img.save(os.path.join(output_dir, cam_front_data['filename'].split('/')[-1]))
+            img = Image.fromarray(fov_mask * map_mask * 255)
+            img.save(os.path.join(path, cam_front_data['filename'].split('/')[-1]))
