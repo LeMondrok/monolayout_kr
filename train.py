@@ -42,7 +42,8 @@ def get_args():
             "odometry",
             "raw",
             "raw_gt",
-            "nuscenes"],
+            "nuscenes",
+            "nuscenes_mini"],
         help="Data split for training/validation")
     parser.add_argument("--ext", type=str, default="png",
                         help="File extension of the images")
@@ -126,7 +127,8 @@ class Trainer:
                         "argo": monolayout.Argoverse,
                         "raw": monolayout.KITTIRAW,
                         "raw_gt": monolayout.KITTIRAWGT,
-                        "nuscenes": monolayout.nuScenesFront}
+                        "nuscenes": monolayout.nuScenesFront,
+                        "nuscenes_mini": monolayout.nuScenesFront}
 
         self.dataset = dataset_dict[self.opt.split]
         fpath = os.path.join(
@@ -248,7 +250,6 @@ class Trainer:
                 len(val_dataset)))
 
     def train(self):
-
         for self.epoch in range(self.opt.num_epochs):
             loss = self.run_epoch()
             if self.opt.type == "both":
@@ -391,6 +392,36 @@ class Trainer:
                         }
                     )
                     sent = 1
+
+        if self.opt.type == "both":
+            iou_static /= len(self.val_loader)
+            mAP_static /= len(self.val_loader)
+            iou_dynamic /= len(self.val_loader)
+            mAP_dynamic /= len(self.val_loader)
+            
+            if self.opt.use_wandb == 1:
+                wandb.log({
+                    'validation_iou_static': iou_static[:, 1],
+                    'validation_mAP_static': mAP_static[:, 1],
+                    'validation_iou_dynamic': iou_dynamic[:, 1],
+                    'validation_mAP_dynamic': mAP_dynamic[:, 1]
+                })
+
+            print(
+                "Epoch: {} | Validation: mIOU_static: {} mAP_static: {} mIOU_dynamic: {} mAP_dynamic: {}".format(
+                    self.epoch, iou_static[:, 1], mAP_static[:, 1], iou_dynamic[:, 1], mAP_dynamic[:, 1]
+                )
+            )
+        else:
+            iou /= len(self.val_loader)
+            mAP /= len(self.val_loader)
+
+            if self.opt.use_wandb == 1:
+                wandb.log({'validation_iou': iou[:, 1], 'validation_mAP': mAP[:, 1]})
+
+            print(
+                "Epoch: {} | Validation: mIOU: {} mAP: {}".format(self.epoch, iou[:, 1], mAP[:, 1])
+            )
 
     def compute_losses(self, inputs, outputs):
         losses = {}

@@ -129,7 +129,7 @@ if __name__ == "__main__":
             for annotation in my_sample['anns']:
                 annotation_metadata = nusc.get('sample_annotation', annotation)
 #                 if int(annotation_metadata['visibility_token']) > 2 and annotation_metadata['category_name'].split('.')[0] == 'vehicle':
-                if int(annotation_metadata['visibility_token']) > 2 and annotation_metadata['category_name'].split('.')[1] == cls_:
+                if int(annotation_metadata['visibility_token']) > 2 and len(annotation_metadata['category_name'].split('.')) > 1 and annotation_metadata['category_name'].split('.')[1] == cls_:
                     new_pic += abs2ego(ego_pose, cam_pose, annotation_metadata)
 
             if fov_mask is None:
