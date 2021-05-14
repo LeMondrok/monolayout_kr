@@ -76,7 +76,7 @@ def test(args):
     else:
         decoder_path = os.path.join(args.model_path, "decoder.pth")
         models["decoder"] = model.Decoder(
-            models["encoder"].resnet_encoder.num_ch_enc)
+            models["encoder"].resnet_encoder.num_ch_enc, 3)
         models["decoder"].load_state_dict(
             torch.load(decoder_path, map_location=device))
 
@@ -126,29 +126,36 @@ def test(args):
                     features, is_training=False)
                 dynamic_tv = models["dynamic_decoder"](
                     features, is_training=False)
-                save_topview(
-                    idx,
-                    static_tv,
-                    os.path.join(
-                        args.out_dir,
-                        "static",
-                        "{}.png".format(output_name)))
-                save_topview(
-                    idx,
-                    dynamic_tv,
-                    os.path.join(
-                        args.out_dir,
-                        "dynamic",
-                        "{}.png".format(output_name)))
+                for cls_ind in range(static_tv.shape[2]):
+                    save_topview(
+                        idx,
+                        static_tv[:,:, cls_ind],
+                        os.path.join(
+                            args.out_dir,
+                            "static",
+                            str(cls_ind),
+                            "{}.png".format(output_name)))
+                    
+                for cls_ind in range(dynamic_tv.shape[2]):
+                    save_topview(
+                        idx,
+                        dynamic_tv[:,:, cls_ind],
+                        os.path.join(
+                            args.out_dir,
+                            "dynamic",
+                            str(cls_ind),
+                            "{}.png".format(output_name)))
             else:
                 tv = models["decoder"](features, is_training=False)
-                save_topview(
-                    idx,
-                    tv,
-                    os.path.join(
-                        args.out_dir,
-                        args.type,
-                        "{}.png".format(output_name)))
+                for cls_ind in range(tv.shape[2]):
+                    save_topview(
+                        idx,
+                        tv[:,:, cls_ind],
+                        os.path.join(
+                            args.out_dir,
+                            args.type,
+                            str(cls_ind),
+                            "{}.png".format(output_name)))
 
     print('-> Done!')
 

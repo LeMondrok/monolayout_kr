@@ -262,7 +262,7 @@ class Trainer:
             if self.epoch % self.opt.log_frequency == 0:
                 self.validation()
                 self.save_model()
-
+fake_pred = self.models["discriminator
     def process_batch(self, inputs, validation=False):
         outputs = {}
         for key, inpt in inputs.items():
@@ -296,12 +296,27 @@ class Trainer:
         for batch_idx, inputs in tqdm.tqdm(enumerate(self.train_loader)):
             outputs, losses = self.process_batch(inputs)
             self.model_optimizer.zero_grad()
-            fake_pred = self.models["discriminator"](outputs["topview"])
-            real_pred = self.models["discriminator"](inputs["discr"].float())
-            loss_GAN = self.criterion_d(fake_pred, self.valid)
-            loss_D = self.criterion_d(
-                fake_pred, self.fake) + self.criterion_d(real_pred, self.valid)
-            loss_G = self.opt.lambda_D * loss_GAN + losses["loss"]
+            if self.opt.type == "both":
+                fake_pred_static = self.models["static_discr"](outputs["static"])
+                real_pred_static = self.models["static_discr"](inputs["static_discr"].float())
+                loss_GAN_static = self.criterion_d(fake_pred, self.valid)
+                loss_D_static = self.criterion_d(
+                    fake_pred_static, self.fake) + self.criterion_d(real_pred_static, self.valid)
+                loss_G_static = self.opt.lambda_D * loss_GAN + losses["static_loss"]
+                        
+                fake_pred_dynamic = self.models["dynamic_discr"](outputs["dynamic"])
+                real_pred_dynamic = self.models["dynamic_discr"](inputs["dynamic_discr"].float())
+                loss_GAN_dynamic = self.criterion_d(fake_pred, self.valid)
+                loss_D_dynamic = self.criterion_d(
+                    fake_pred_dynamic, self.fake) + self.criterion_d(real_pred_dynamic, self.valid)
+                loss_G_dynamic = self.opt.lambda_D * loss_GAN + losses["dynamic_loss"]
+            else:
+                fake_pred = self.models["discriminator"](outputs["topview"])
+                real_pred = self.models["discriminator"](inputs["discr"].float())
+                loss_GAN = self.criterion_d(fake_pred, self.valid)
+                loss_D = self.criterion_d(
+                    fake_pred, self.fake) + self.criterion_d(real_pred, self.valid)
+                loss_G = self.opt.lambda_D * loss_GAN + losses["loss"]
 
             if self.opt.use_wandb == 1:
                 if self.opt.type == "both":
@@ -316,19 +331,42 @@ class Trainer:
 
             # Train Discriminator
             if self.epoch > self.opt.discr_train_epoch:
-                loss_G.backward(retain_graph=True)
-                self.model_optimizer_D.zero_grad()
-                loss_D.backward()
-                self.model_optimizer.step()
-                self.model_optimizer_D.step()
+                if self.opt.type == "both":
+                    loss_G_static.backward(retain_graph=True)
+                    loss_G_dynamic.backward(retain_graph=True)
+                    self.model_optimizer_D.zero_grad()
+                    loss_D_static.backward()
+                    loss_D_dynamic.backward()
+                    self.model_optimizer.step()
+                    self.model_optimizer_D.step()
+            
+                else:
+                    loss_G.backward(retain_graph=True)
+                    self.model_optimizer_D.zero_grad()
+                    loss_D.backward()
+                    self.model_optimizer.step()
+                    self.model_optimizer_D.step()
             else:
                 losses["loss"].backward()
                 self.model_optimizer.step()
 
-            loss["loss"] += losses["loss"].item()
-            loss["loss_discr"] += loss_D.item()
-        loss["loss"] /= len(self.train_loader)
-        loss["loss_discr"] /= len(self.train_loader)
+            if self.opt.type == "both":
+                loss["static_loss"] += losses["static_loss"]
+                loss["dyna2mic_loss"] += losses["dynamic_loss"]
+                loss["loss_static_discr"] += loss_D_static.item()
+                loss["loss_dynamic_discr"] += loss_D_dynamic.item()
+            else:
+                loss["loss"] += losses["loss"].item()
+                loss["loss_discr"] += loss_D.item()
+                        
+        if self.opt.type == "both":
+            loss["static_loss"] /= len(self.train_loader)
+            loss["dynamic_loss"] /= len(self.train_loader)
+            loss["loss_static_discr"] /= len(self.train_loader)
+            loss["loss_dynamic_discr"] /= len(self.train_loader)
+        else:
+            loss["loss"] /= len(self.train_loader)
+            loss["loss_discr"] /= len(self.train_loader)
         return loss
 
     def validation(self):

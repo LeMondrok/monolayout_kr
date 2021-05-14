@@ -171,32 +171,22 @@ class Decoder(nn.Module):
             x = upsample(x)
             x = self.convs[("upconv", i, 1)](x)
             x = self.convs[("norm", i, 1)](x)
+            
+        x = self.convs["topview"](x)
+            
+        new_shape = []
+        for ind, dim in enumerate(x.shape):
+            if ind == 1:
+                new_shape.append(2)
+                new_shape.append(dim // 2)
+            else:
+                new_shape.append(dim)
+        x = x.reshape(new_shape)
 
-        if is_training:
-            x = self.convs["topview"](x)
-            
-            new_shape = []
-            for ind, dim in enumerate(x.shape):
-                if ind == 1:
-                    new_shape.append(2)
-                    new_shape.append(dim // 2)
-                else:
-                    new_shape.append(dim)
-            x = x.reshape(new_shape)
-            
-        else:
-            new_shape = []
-            for ind, dim in enumerate(x.shape):
-                if ind == 1:
-                    new_shape.append(2)
-                    new_shape.append(dim / 2)
-                else:
-                    new_shape.append(dim)
-
-            x = x.reshape(new_shape)
-            
+        if not is_training:            
             softmax = nn.Softmax2d()
-            x = softmax(self.convs["topview"](x))
+            for class_ind in range(x.shape[2]):
+                x[:, :, class_ind] = softmax(x[:, :, class_ind])
 
         return x
 
