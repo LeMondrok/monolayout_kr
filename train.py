@@ -262,7 +262,7 @@ class Trainer:
             if self.epoch % self.opt.log_frequency == 0:
                 self.validation()
                 self.save_model()
-fake_pred = self.models["discriminator
+
     def process_batch(self, inputs, validation=False):
         outputs = {}
         for key, inpt in inputs.items():
@@ -326,7 +326,7 @@ fake_pred = self.models["discriminator
                         
                     })
                 else:
-                    wandb.log({'loss_GAN': loss_G, 'loss_D': loss_D, 'loss_G': loss_G, 'loss': losses["loss"]})
+                    wandb.log({'loss_GAN': loss_GAN, 'loss_D': loss_D, 'loss_G': loss_G, 'loss': losses["loss"]})
                 
 
             # Train Discriminator
@@ -352,7 +352,7 @@ fake_pred = self.models["discriminator
 
             if self.opt.type == "both":
                 loss["static_loss"] += losses["static_loss"]
-                loss["dyna2mic_loss"] += losses["dynamic_loss"]
+                loss["dynamic_loss"] += losses["dynamic_loss"]
                 loss["loss_static_discr"] += loss_D_static.item()
                 loss["loss_dynamic_discr"] += loss_D_dynamic.item()
             else:

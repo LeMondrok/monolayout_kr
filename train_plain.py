@@ -124,7 +124,7 @@ class Trainer:
                         "argo": monolayout.Argoverse,
                         "raw": monolayout.KITTIRAW,
                         "raw_gt": monolayout.KITTIRAW,
-                        "nuscenes": monolayout.nuScenesFront
+                        "nuscenes": monolayout.nuScenesFront,
                         "nuscenes_mini": monolayout.nuScenesFront}
 
         self.dataset = dataset_dict[self.opt.split]

@@ -67,9 +67,21 @@ def get_fov_mask(cam_data):
     return ans
 
 classes = [
+    'polygon',
+    'line',
+    'node',
     'drivable_area',
+    'road_segment',
+    'road_block',
+    'lane',
     'ped_crossing',
     'walkway',
+    'stop_line',
+    'carpark_area',
+    'lane_connector',
+    'road_divider',
+    'lane_divider',
+    'traffic_light'
 ]
 
 
